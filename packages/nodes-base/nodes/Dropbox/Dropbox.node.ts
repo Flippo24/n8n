@@ -11,21 +11,23 @@ import {
 } from 'n8n-workflow';
 
 import {
-	dropboxApiRequest
+	dropboxApiRequest,
+	dropboxpiRequestAllItems,
+	getRootDirectory,
 } from './GenericFunctions';
 
 export class Dropbox implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Dropbox',
 		name: 'dropbox',
-		icon: 'file:dropbox.png',
+		icon: 'file:dropbox.svg',
 		group: ['input'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description: 'Access data on Dropbox',
 		defaults: {
 			name: 'Dropbox',
-			color: '#0062ff',
+			color: '#007ee5',
 		},
 		inputs: ['main'],
 		outputs: ['main'],
@@ -123,6 +125,11 @@ export class Dropbox implements INodeType {
 						name: 'Move',
 						value: 'move',
 						description: 'Move a file',
+					},
+					{
+						name: 'Search',
+						value: 'search',
+						description: 'Search a file',
 					},
 					{
 						name: 'Upload',
@@ -419,7 +426,68 @@ export class Dropbox implements INodeType {
 				description: 'Name of the binary property which contains<br />the data for the file to be uploaded.',
 			},
 
-
+			// ----------------------------------
+			//         file:search
+			// ----------------------------------
+			{
+				displayName: 'Query',
+				name: 'query',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: [
+							'search',
+						],
+						resource: [
+							'file',
+						],
+					},
+				},
+				description: ' The string to search for. May match across multiple fields based on the request arguments.',
+			},
+			{
+				displayName: 'Return All',
+				name: 'returnAll',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						operation: [
+							'search',
+						],
+						resource: [
+							'file',
+						],
+					},
+				},
+				default: false,
+				description: 'If all results should be returned or only up to a given limit.',
+			},
+			{
+				displayName: 'Limit',
+				name: 'limit',
+				type: 'number',
+				displayOptions: {
+					show: {
+						resource: [
+							'file',
+						],
+						operation: [
+							'search',
+						],
+						returnAll: [
+							false,
+						],
+					},
+				},
+				typeOptions: {
+					minValue: 1,
+					maxValue: 10,
+				},
+				default: 5,
+				description: 'How many results to return.',
+			},
 
 			// ----------------------------------
 			//         folder
@@ -484,11 +552,13 @@ export class Dropbox implements INodeType {
 
 		let endpoint = '';
 		let requestMethod = '';
+		let returnAll = false;
+		let property = '';
 		let body: IDataObject | Buffer;
 		let options;
 		const query: IDataObject = {};
 
-		const headers: IDataObject = {};
+		let headers: IDataObject = {};
 
 		for (let i = 0; i < items.length; i++) {
 			body = {};
@@ -544,6 +614,30 @@ export class Dropbox implements INodeType {
 						// Is text file
 						body = Buffer.from(this.getNodeParameter('fileContent', i) as string, 'utf8');
 					}
+				} else if (operation === 'search') {
+					// ----------------------------------
+					//         search
+					// ----------------------------------
+
+					// get the root directory to set it as the default search folder
+					const { root_info: { root_namespace_id } } = await getRootDirectory.call(this);
+					headers = {
+						'dropbox-api-path-root': JSON.stringify({
+							'.tag': 'root',
+							'root': root_namespace_id,
+						})
+					};
+
+					returnAll = this.getNodeParameter('returnAll', 0) as boolean;
+
+					property = 'matches';
+
+					requestMethod = 'POST';
+					body = {
+						query: this.getNodeParameter('query', i) as string,
+					};
+
+					endpoint = 'https://api.dropboxapi.com/2/files/search_v2';
 				}
 
 			} else if (resource === 'folder') {
@@ -625,7 +719,13 @@ export class Dropbox implements INodeType {
 				options = { encoding: null };
 			}
 
-			let responseData = await dropboxApiRequest.call(this, requestMethod, endpoint, body, query, headers, options);
+			let responseData;
+
+			if (returnAll === true) {
+				responseData = await dropboxpiRequestAllItems.call(this, property, requestMethod, endpoint, body, query, headers);
+			} else {
+				responseData = await dropboxApiRequest.call(this, requestMethod, endpoint, body, query, headers);
+			}
 
 			if (resource === 'file' && operation === 'upload') {
 				responseData = JSON.parse(responseData);
@@ -677,8 +777,14 @@ export class Dropbox implements INodeType {
 
 					returnData.push(newItem as IDataObject);
 				}
+			} else if (resource === 'file' && operation === 'search') {
+				if (returnAll === true) {
+					returnData.push.apply(returnData, responseData);
+				} else {
+					returnData.push.apply(returnData, responseData[property]);
+				}
 			} else {
-				returnData.push(responseData as IDataObject);
+				returnData.push(responseData);
 			}
 		}
 

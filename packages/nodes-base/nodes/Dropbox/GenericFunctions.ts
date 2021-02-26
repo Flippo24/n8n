@@ -20,7 +20,7 @@ import {
  * @param {object} body
  * @returns {Promise<any>}
  */
-export async function dropboxApiRequest(this: IHookFunctions | IExecuteFunctions, method: string, endpoint: string, body: object, query: IDataObject = {}, headers?: object, option: IDataObject = {}): Promise<any> {// tslint:disable-line:no-any
+export async function dropboxApiRequest(this: IHookFunctions | IExecuteFunctions, method: string, endpoint: string, body: object, query: IDataObject = {}, headers: object = {}, option: IDataObject = {}): Promise<any> {// tslint:disable-line:no-any
 
 	const options: OptionsWithUri = {
 		headers,
@@ -67,3 +67,24 @@ export async function dropboxApiRequest(this: IHookFunctions | IExecuteFunctions
 		throw error;
 	}
 }
+
+export async function dropboxpiRequestAllItems(this: IExecuteFunctions | IHookFunctions, propertyName: string, method: string, endpoint: string, body: any = {}, query: IDataObject = {}, headers: IDataObject = {}): Promise<any> { // tslint:disable-line:no-any
+
+	const returnData: IDataObject[] = [];
+
+	let responseData;
+	do {
+		responseData = await dropboxApiRequest.call(this, method, endpoint, body, query, headers);
+		returnData.push.apply(returnData, responseData[propertyName]);
+	} while (
+		responseData.has_more !== false
+	);
+
+	return returnData;
+}
+
+export function getRootDirectory(this: IHookFunctions | IExecuteFunctions) {
+	return dropboxApiRequest.call(this, 'POST', 'https://api.dropboxapi.com/2/users/get_current_account', {});
+}
+
+
